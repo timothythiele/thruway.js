@@ -1,3 +1,4 @@
+import {TransportInterface} from "./Transport/TransportInterface";
 import {WampChallengeException} from './Common/WampChallengeException';
 import {WebSocketTransport} from './Transport/WebSocketTransport';
 import {RegisterObservable, RegisterOptions} from './Observable/RegisterObservable';
@@ -17,7 +18,18 @@ import {HelloMessage} from './Messages/HelloMessage';
 import {AbortMessage} from './Messages/AbortMessage';
 import {IMessage} from './Messages/Message';
 import {Utils} from './Common/Utils';
-import {empty, Observable, of, ReplaySubject, Subject, Subscription, throwError, timer, asyncScheduler} from 'rxjs';
+import {
+    asyncScheduler,
+    empty,
+    merge,
+    Observable,
+    of,
+    ReplaySubject,
+    Subject,
+    Subscription,
+    throwError,
+    timer
+} from 'rxjs';
 
 import {
     catchError,
@@ -26,7 +38,6 @@ import {
     filter,
     map,
     mapTo,
-    merge,
     mergeMap,
     multicast,
     refCount,
@@ -38,37 +49,29 @@ import {
     takeUntil,
     tap
 } from "rxjs/operators";
-import {TransportInterface} from "./Transport/TransportInterface";
 
 export class Client {
     private messages: Observable<IMessage>;
-    private subscription: Subscription;
-    private _session: Observable<WelcomeMessage>;
+    private subscription: Subscription = new Subscription();
+    private _session: Observable<IMessage>;
     private challengeCallback: (challenge: Observable<any>) => Observable<string>;
     private currentRetryCount = 0;
+    private _onClose: Observable<IMessage>;
+    private callObs: any;
 
     constructor(private urlOrTransport: string | TransportInterface,
                 private realm: string,
                 private options: WampOptions = {},
                 private transport?: TransportInterface) {
 
-        const {maxRetryDelay, initialRetryDelay, retryDelayGrowth, maxRetries} = o;
+        this.transport = typeof urlOrTransport === 'string'
+            ? new WebSocketTransport(urlOrTransport)
+            : <TransportInterface>this.urlOrTransport;
 
-        return attempts
-            .flatMap((ex: { message: any; }) => {
-                console.error(ex.message);
-                const delay = Math.min(maxRetryDelay, Math.pow(retryDelayGrowth, ++this.currentRetryCount) + initialRetryDelay);
-                console.log('Reconnecting attempt: ' + this.currentRetryCount + ', Retrying in: ' + (delay / 1000).toPrecision(4) + ' seconds.');
-                return Observable.timer(Math.floor(delay));
-            })
-            .take(maxRetries);
-    };
-}
+        const open = this.transport.onOpen;
 
-export class RetryOptions {
-    constructor(urlOrTransportOrObs: string | Subject<IMessage> | Observable<ThruwayConfig>, realm?: string, options: WampOptions = {}) {
-
-        this.messages = this.transport.pipe(retryWhen((attempts: Observable<Error>) => {
+        this.messages = this.transport.pipe(
+            retryWhen((attempts: Observable<Error>) => {
                 const maxRetryDelay = 300000;
                 const initialRetryDelay = 1500;
                 const retryDelayGrowth = 1.5;
@@ -78,8 +81,8 @@ export class RetryOptions {
                     .pipe(mergeMap((ex: any) => {
                             console.error(ex.message);
                             console.log('Reconnecting');
-                            const delay = Math.min(maxRetryDelay, Math.pow(retryDelayGrowth, ++this.currentRetryCount) + initialRetryDelay);
-                            return timer(Math.floor(delay));
+                            const attemptDelay = Math.min(maxRetryDelay, Math.pow(retryDelayGrowth, ++this.currentRetryCount) + initialRetryDelay);
+                            return timer(Math.floor(attemptDelay));
                         })
                         , take(maxRetries));
             })
@@ -124,42 +127,16 @@ export class RetryOptions {
                 }
                 return throwError(error);
             })
-            , tap(m => this.transport.next(m)));
+            , tap((m: any) => this.transport.next(m)));
 
-        this._session = this.messages
-            .pipe(merge(challengeMsg)
-                , filter((msg: IMessage) => msg instanceof WelcomeMessage)
-                , multicast(() => new ReplaySubject(1))
-                , refCount());
+        this._session = merge(challengeMsg, this.messages.pipe(
+            filter((msg: IMessage) => msg instanceof WelcomeMessage),
+            multicast(() => new ReplaySubject(1)),
+            refCount()
+        ));
 
-        [abortMsg, remainingMsgs] = remainingMsgs.partition(msg => msg instanceof AbortMessage);
-
-        goodByeMsg = goodByeMsg.do(v => this._onClose.next(v));
-
-        remainingMsgs = remainingMsgs.merge(goodByeMsg);
-
-        abortMsg = abortMsg.do(v => this._onClose.next(v));
-
-        const challenge = this.challenge(challengeMsg)
-            .combineLatest(transportData)
-            .do(([msg, td]) => td.transport.next(msg));
-
-        const abortError = abortMsg.map((msg: AbortMessage) => {
-            throw new Error(msg.details.message + ' ' + msg.reason)
-        });
-
-        [welcomeMsg, remainingMsgs] = remainingMsgs
-            .merge(challenge.share())
-            .merge(abortError.share())
-            .partition(msg => msg instanceof WelcomeMessage) as [Observable<WelcomeMessage>, Observable<IMessage>];
-
-        this._session = welcomeMsg
-            .combineLatest(transportData)
-            .map(([msg, td]) => ({messages: remainingMsgs, transport: td.transport, welcomeMsg: msg}))
-            .multicast(() => new ReplaySubject(1)).refCount();
+        this.subscription.add(this.transport);
     }
-
-    private _onClose: Observable<IMessage>;
 
     get onClose(): Observable<IMessage> {
         return this._onClose;
@@ -215,28 +192,29 @@ export class RetryOptions {
         const obs = typeof value.subscribe === 'function' ? value as Observable<T> : of(value);
         const completed = new Subject();
 
-        return this._session
-            .pipe(takeUntil(completed)
-                , takeUntil(this.onClose)
-                , mapTo(obs.pipe(tap(null, null, () => {
-                    completed.next(0);
-                })))
-                , exhaust()
-                , map(v => new PublishMessage(Utils.uniqueId(), options, uri, [v])))
+        return this._session.pipe(
+            takeUntil(completed)
+            , takeUntil(this.onClose)
+            , mapTo(obs.pipe(tap(null, null, () => {
+                completed.next(0);
+            })))
+            , exhaust()
+            , map(v => new PublishMessage(Utils.uniqueId(), options, uri, [v])))
             .subscribe(this.transport);
     }
 
     public call(uri: string, args?: Array<any>, argskw?: Object, options?: CallOptions): Observable<ResultMessage> {
-        return this._session.pipe(
-            merge(this.onClose.pipe(mapTo(throwError(new Error('Connection Closed')))))
-            , take(1)
-            , switchMapTo(new CallObservable(uri, this.messages, this.transport, args, argskw, options)));
+        return merge(this.onClose.pipe(mapTo(throwError(new Error('Connection Closed')))), this._session.pipe(
+            take(1),
+            switchMapTo(new CallObservable(uri, this.messages, this.transport, args, argskw, options))
+        ));
     }
 
     public register(uri: string, callback: Function, options?: RegisterOptions): Observable<RegisteredMessage | UnregisteredMessage> {
-        return this._session.pipe(
-            merge(this.onClose.pipe(mapTo(throwError(new Error('Connection Closed')))))
-            , switchMapTo(new RegisterObservable(uri, callback, this.messages, this.transport, options)));
+        // @ts-ignore
+        return merge(this.onClose.pipe(mapTo(throwError(new Error('Connection Closed')))), this._session.pipe(
+            switchMapTo(new RegisterObservable(uri, callback, this.messages, this.transport, options))
+        ));
     }
 
     public progressiveCall(uri: string, args?: Array<any>, argskw?: Object, options: CallOptions = {}): Observable<ResultMessage> {
@@ -244,16 +222,16 @@ export class RetryOptions {
         options.receive_progress = true;
         const completed = new Subject();
         let retry = false;
-        return this._session.pipe(
-            merge(this.onClose.pipe(mapTo(throwError(new Error('Connection Closed')))))
-            , takeUntil(completed)
-            , switchMapTo(callObs.pipe(tap(null, null, () => {
+        // @ts-ignore
+        return merge(this.onClose.pipe(mapTo(throwError(new Error('Connection Closed')))), this._session.pipe(
+            takeUntil(completed),
+            switchMapTo(this.callObs.pipe(tap(null, null, () => {
                 completed.next(0);
-            })))
-            , tap(() => {
+            }))),
+            tap(() => {
                 retry = false
-            })
-            , retryWhen((errors: Observable<any>) => {
+            }),
+            retryWhen((errors: Observable<any>) => {
                 return errors.pipe(
                     mergeMap((e: WampErrorException) => {
                         // start retrying when we get a canceled error and continue retrying until we get a value
@@ -265,7 +243,8 @@ export class RetryOptions {
                         return empty();
                     })
                     , delay(5000));
-            }));
+            })
+        ));
     }
 
     public progressiveRegister(uri: string, callback: Function, options: RegisterOptions = {}): Observable<any> {
@@ -279,31 +258,8 @@ export class RetryOptions {
         this.challengeCallback = challengeCallback;
     }
 
-    private challenge = (challengeMsg: Observable<IMessage>) => {
-        return challengeMsg
-            .switchMap((msg: ChallengeMessage) => {
-                let challengeResult: Observable<string> = null;
-
-                try {
-                    challengeResult = this.challengeCallback(Observable.of(msg))
-                } catch (e) {
-                    console.error(e);
-                    throw new WampChallengeException(msg);
-                }
-
-                return challengeResult.take(1);
-            })
-            .map((signature: string) => new AuthenticateMessage(signature))
-            .catch((e: { abortMessage: () => any; }) => {
-                if (e instanceof WampChallengeException) {
-                    return Observable.of(e.abortMessage());
-                }
-                return Observable.throw(e);
-            });
-    };
-
     public close() {
-        this._onClose.next();
+        this.subscription.unsubscribe();
     }
 }
 
@@ -311,28 +267,6 @@ export interface WampOptions {
     authmethods?: Array<string>;
     roles?: Object;
     role?: string;
-    retryWhen?: (attempts: Observable<Error>) => Observable<any>;
-    retryOptions?: RetryOptions;
-    timeout?: number;
 
     [propName: string]: any;
-}
-
-export interface SessionData {
-    messages: Observable<IMessage>,
-    transport: Subject<IMessage>,
-    welcomeMsg: WelcomeMessage
-}
-
-export interface ThruwayConfig {
-    autoOpen?: boolean
-    url: string;
-    realm: string;
-    options: WampOptions;
-}
-
-export interface TransportData {
-    transport: Subject<IMessage>,
-    realm: string,
-    options: WampOptions
 }

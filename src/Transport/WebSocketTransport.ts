@@ -1,12 +1,11 @@
 import {CreateMessage} from '../Messages/CreateMessage';
 import {OpenMessage} from '../Messages/OpenMessage';
-import {TransportInterface} from './TransportInterface';
 import {fromEvent, Observable, of, Subject, Subscriber, Subscription, timer} from "rxjs";
 import {catchError, delay, startWith, switchMapTo, takeUntil, tap} from "rxjs/operators";
-import WS = require('ws');
 import 'rxjs/add/observable/fromEvent';
 import 'rxjs/add/operator/startWith';
 import 'rxjs/add/operator/catch';
+import WS = require('ws');
 
 // This is used for WebSockets in node - removed by webpack for bundling
 declare var require: any;
@@ -16,6 +15,8 @@ export class WebSocketTransport<M> extends Subject<M> {
 
     private output: Subject<any> = new Subject();
     private socket: WebSocket = null;
+    private openSubject = new Subject();
+    private closeSubject = new Subject();
     private resetKeepaliveSubject = new Subject();
     private keepAliveTimer = 30000;
 

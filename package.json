@@ -1,11 +1,11 @@
 {
   "name": "thruway.js",
-  "version": "2.0.7",
+  "version": "2.0.7-beta2",
   "description": "WAMP RxJS Client",
   "main": "index.js",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/voryx/Thruway.js.git"
+    "url": "git+https://github.com/timothythiele/thruway.js.git"
   },
   "keywords": [
     "wamp",
@@ -23,6 +23,8 @@
   },
   "homepage": "https://github.com/voryx/Thruway.js#readme",
   "peerDependencies": {
+    "@types/node": "10.23.0",
+    "@types/sinon": "^5.0.2",
     "rxjs": "^6.6.3",
     "ws": "^6.0.0"
   },
@@ -33,7 +35,7 @@
   "scripts": {
     "compile": "tsc",
     "watch": "tsc --watch",
-    "webpack": "webpack --optimize-minimize",
+    "webpack": "webpack",
     "clean_spec": "shx rm -rf spec-js",
     "build_spec": "tsc --project ./spec --pretty",
     "test_mocha": "mocha spec-js/spec/*",
@@ -44,8 +46,6 @@
     "@types/escape-string-regexp": "^1.0.0",
     "@types/lodash": "^4.14.116",
     "@types/mocha": "^5.2.5",
-    "@types/node": "10.11.3",
-    "@types/sinon": "^5.0.2",
     "@types/sinon-chai": "^3.2.0",
     "@types/ws": "6.0.1",
     "browserfy": "^1.0.0",
@@ -68,5 +68,8 @@
     "typescript": "2.9.2",
     "webpack": "^4.20.2",
     "ws": "^6.0.0"
+  },
+  "devDependencies": {
+    "webpack-cli": "^4.2.0"
   }
 }

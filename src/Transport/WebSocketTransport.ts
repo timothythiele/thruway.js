@@ -5,7 +5,7 @@ import {catchError, delay, startWith, switchMapTo, takeUntil, tap} from "rxjs/op
 import 'rxjs/add/observable/fromEvent';
 import 'rxjs/add/operator/startWith';
 import 'rxjs/add/operator/catch';
-import WS = require('ws');
+import * as WS from 'ws';
 
 // This is used for WebSockets in node - removed by webpack for bundling
 declare var require: any;
